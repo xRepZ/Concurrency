@@ -26,12 +26,37 @@ const (
 	ELECTRONICS
 )
 
+// type Ship interface {
+// 	GetType()
+// }
+
 type Ship struct {
 	id         int
 	cap        int
 	currentCap int
 	SType      ShipType
 }
+
+// type FuelShip struct {
+// 	id         int
+// 	cap        int
+// 	currentCap int
+// 	SType      ShipType
+// }
+
+// type ElectShip struct {
+// 	id         int
+// 	cap        int
+// 	currentCap int
+// 	SType      ShipType
+// }
+
+// type ProvShip struct {
+// 	id         int
+// 	cap        int
+// 	currentCap int
+// 	SType      ShipType
+// }
 
 func createShips(id int) *Ship {
 	rand.Seed(time.Now().UnixNano())
@@ -70,7 +95,7 @@ func (s *ShipGen) startShipGen(wg *sync.WaitGroup, t chan *Ship) {
 	defer close(t)
 	for i := 0; i < numOfShips; i++ {
 		s.tunnel.addShipToTunnel(createShips(i))
-															log.Println("Корабль сгенерирован")
+		log.Println("Корабль сгенерирован")
 		//time.Sleep(time.Second)
 
 	}
@@ -104,58 +129,97 @@ func (t *Tunnel) addShipToTunnel(sh *Ship) {
 }
 
 type Dock struct {
-	tunnel   *Tunnel
+	ships    chan *Ship
 	shipType ShipType
 }
 
-func newDock(t *Tunnel, st ShipType) *Dock {
+func newDock(c chan *Ship, st ShipType) *Dock {
+
 	return &Dock{
-		tunnel:   t,
+		ships:    c,
 		shipType: st,
 	}
 }
+
+type TunnelDistributor struct {
+	tunnel    *Tunnel
+	FuelChan  chan *Ship
+	ElectChan chan *Ship
+	ProvChan  chan *Ship
+}
+
+func newDistributor(t *Tunnel) *TunnelDistributor {
+	fchan := make(chan *Ship)
+	echan := make(chan *Ship)
+	pchan := make(chan *Ship)
+	return &TunnelDistributor{
+		tunnel:    t,
+		FuelChan:  fchan,
+		ElectChan: echan,
+		ProvChan:  pchan,
+	}
+}
+
+func (dist *TunnelDistributor) distributor(wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer close(dist.FuelChan)
+	defer close(dist.ProvChan)
+	defer close(dist.ElectChan)
+	for sh := range dist.tunnel.ships {
+		switch sh.SType {
+		case FUEL:
+			dist.FuelChan <- sh
+		case PROVISION:
+			dist.ProvChan <- sh
+		case ELECTRONICS:
+			dist.ElectChan <- sh
+		}
+	}
+
+}
+
 // переделать
-// func (d *Dock) unloadShip(wg *sync.WaitGroup) {
-// 	defer wg.Done()
-// 	fmt.Println("Started")
-// 	for k := range d.tunnel.ships {
-// 		if k.SType == d.shipType {
-// 			//fmt.Println("ожидаем разгрузки, ", d.shipType)
-// 			time.Sleep(time.Second * 10)
+func (d *Dock) unloadShip(wg *sync.WaitGroup) {
+	defer wg.Done()
+	fmt.Println("Started")
+	for k := range d.ships {
+		if k.SType == d.shipType {
+			//fmt.Println("ожидаем разгрузки, ", d.shipType)
+			time.Sleep(time.Second * 1)
 
-// 			fmt.Println("Выгружен корабль номер: ", k.id)
-// 		} else {
-// 			fmt.Println("wrong type ", k.id)
-// 		}
-// 	}
-// }
+			fmt.Println("Выгружен корабль номер: ", k.id)
+		} else {
+			fmt.Println("wrong type ", k.id)
+		}
+	}
+}
+
 // Генератор -> Распределитель(принимает, отдаёт) -> ДОКИ
-
 
 func main() {
 	tunnel := newTunnel()
 
 	fmt.Println("размер", len(tunnel.ships))
 	gen := newShipGen(tunnel)
-	d1 := newDock(tunnel, PROVISION)
-	d2 := newDock(tunnel, FUEL)
-	d3 := newDock(tunnel, ELECTRONICS)
+	dist := newDistributor(tunnel)
+	d1 := newDock(dist.ProvChan, PROVISION)
+	d2 := newDock(dist.FuelChan, FUEL)
+	d3 := newDock(dist.ElectChan, ELECTRONICS)
 
 	//==============
 
 	wg := &sync.WaitGroup{}
 
-	wg.Add(4)
+	wg.Add(5)
 
 	go gen.startShipGen(wg, tunnel.ships)
+	go dist.distributor(wg)
 
 	go d1.unloadShip(wg)
 	go d2.unloadShip(wg)
 	go d3.unloadShip(wg)
 
-
 	wg.Wait()
-	
 
 	//==============
 
